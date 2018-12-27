@@ -1,0 +1,3 @@
+spring:
+  application:
+     name: live-gateway  # Service registers under this name

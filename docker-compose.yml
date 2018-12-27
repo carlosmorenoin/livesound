@@ -1,0 +1,142 @@
+version: '3'
+services:
+  mongodb:
+    image: mongo
+    ports:
+      - "27017:27017"
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    extra_hosts:
+      - "moby:127.0.0.1"
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    extra_hosts:
+      - "moby:127.0.0.1"
+
+  live-config:
+    image: java:openjdk-8u91-jdk
+    working_dir: /app
+    volumes:
+      - ./livesound-config/target:/app
+    command: java -Djava.security.egd=file:/dev/./urandom -jar livesound-config.jar --server.port=8888
+    ports:
+      - "8888:8888"
+
+  live-discovery:
+    image: java:openjdk-8u91-jdk
+    working_dir: /app
+    volumes:
+      - ./livesound-eureka/target:/app/exec
+      - ./dockerutil:/app/util
+    command: bash ./util/wait-for-it.sh live-config:8888 -t 120 -- java -Djava.security.egd=file:/dev/./urandom -jar exec/livesound-eureka.jar --server.port=1111
+    ports:
+      - "1111:1111"
+    depends_on:
+      - live-config
+    environment:
+      SPRING_CLOUD_CONFIG_URI: http://live-config:8888
+
+  live-auth:
+    image: java:openjdk-8u91-jdk
+    working_dir: /app
+    volumes:
+      - ./livesound-authserver/target:/app/exec
+      - ./dockerutil:/app/util
+    command: bash ./util/wait-for-it.sh live-discovery:1111 -t 120 -- java -Djava.security.egd=file:/dev/./urandom -Dspring.profiles.active=docker -jar exec/livesound-authserver.jar --server.port=9991
+    ports:
+      - "9991:9991"
+    depends_on:
+      - live-discovery
+    environment:
+      SPRING_CLOUD_CONFIG_URI: http://live-config:8888
+      LIVE_DATABASE_HOST: mongodb:27017
+
+  live-users:
+    image: java:openjdk-8u91-jdk
+    working_dir: /app
+    volumes:
+      - ./livesound-users/target:/app/exec
+      - ./dockerutil:/app/util
+    command: bash ./util/wait-for-it.sh live-discovery:1111 -t 120 -- java -Djava.security.egd=file:/dev/./urandom -Dspring.profiles.active=docker -jar exec/livesound-users.jar --server.port=2222
+    expose:
+      - "2222"
+    depends_on:
+      - live-discovery
+    environment:
+      SPRING_CLOUD_CONFIG_URI: http://live-config:8888
+      SPRING_DATA_MONGODB_URI: mongodb://mongodb/live-users
+
+  live-venue-query:
+    image: java:openjdk-8u91-jdk
+    working_dir: /app
+    volumes:
+      - ./livesound-venue-query/target:/app/exec
+      - ./dockerutil:/app/util
+    command: bash ./util/wait-for-it.sh live-discovery:1111 -t 120 -- java -Djava.security.egd=file:/dev/./urandom -Dspring.profiles.active=docker -jar exec/livesound-venue-query.jar --server.port=3333
+    expose:
+      - "3333"
+    depends_on:
+      - live-discovery
+    environment:
+      SPRING_CLOUD_CONFIG_URI: http://live-config:8888
+      SPRING_DATA_MONGODB_URI: mongodb://mongodb/lives-venues
+
+  live-venue-command:
+      image: java:openjdk-8u91-jdk
+      working_dir: /app
+      volumes:
+        - ./livesound-venue-command/target:/app/exec
+        - ./dockerutil:/app/util
+      command: bash ./util/wait-for-it.sh live-discovery:1111 -t 120 -- java -Djava.security.egd=file:/dev/./urandom -Dspring.profiles.active=docker -jar exec/livesound-venue-command.jar --server.port=4444
+      expose:
+        - "4444"
+      depends_on:
+        - live-discovery
+      environment:
+        SPRING_CLOUD_CONFIG_URI: http://live-config:8888
+        SPRING_DATA_MONGODB_URI: mongodb://mongodb/live-venues-event
+
+  live-profiles:
+      image: java:openjdk-8u91-jdk
+      working_dir: /app
+      volumes:
+        - ./livesound-profiles/target:/app/exec
+        - ./dockerutil:/app/util
+      command: bash ./util/wait-for-it.sh live-discovery:1111 -t 120 -- java -Djava.security.egd=file:/dev/./urandom -Dspring.profiles.active=docker -jar exec/livesound-profiles.jar --server.port=5555
+      expose:
+        - "5555"
+      depends_on:
+        - live-discovery
+      environment:
+        SPRING_CLOUD_CONFIG_URI: http://live-config:8888
+        SPRING_DATA_MONGODB_URI: mongodb://mongodb/lives-profiles
+
+  live-gateway:
+    image: java:openjdk-8u91-jdk
+    working_dir: /app
+    volumes:
+      - ./livesound-gateway/target:/app/exec
+      - ./dockerutil:/app/util
+    command: bash ./util/wait-for-it.sh live-discovery:1111 -t 120 -- java -Djava.security.egd=file:/dev/./urandom -Dspring.profiles.active=docker -jar exec/livesound-gateway.jar --server.port=8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      - live-discovery
+    environment:
+      SPRING_CLOUD_CONFIG_URI: http://live-config:8888
+
+###### Is required to add the live-auth hostname on the /etc/hosts file #####

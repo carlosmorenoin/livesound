@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: live-discovery
+  cloud:
+    config:
+      uri: http://localhost:8888
+      fail-fast: true
+
+---
+
+spring:
+  profiles: docker
+  cloud:
+     config:
+        uri: http://live-config:8888

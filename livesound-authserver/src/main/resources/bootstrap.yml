@@ -1,0 +1,7 @@
+spring:
+  application:
+     name: live-auth  # Service registers under this name
+
+  cloud:
+    config:
+      uri: http://localhost:8888
